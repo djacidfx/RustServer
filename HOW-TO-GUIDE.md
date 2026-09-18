@@ -1,7 +1,7 @@
 # 📖 Rust Dedicated Server - Complete Beginner's How-To Guide
 
 A comprehensive, step-by-step guide to installing, configuring, port-forwarding, and managing your own dedicated [Rust](https://rust.facepunch.com/) server on Windows.
-
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/wildcatstudio)
 ---
 
 ## 📑 Table of Contents
@@ -115,3 +115,4 @@ If enabled during setup, Windows Task Scheduler runs nightly maintenance at your
 * **Server crashes on boot:** Check `rust_game/server/RustServer/RustServer_log.txt`. Ensure Visual C++ 2015–2022 Redistributable is installed and your PC has at least 12–16 GB of free RAM.
 * **Friends can't see or join the server:** Double-check your router's port forwarding for UDP `28015` and UDP `28017`.
 * **Where are my settings saved?** In `RustServer.config.json` inside your root server folder. You can edit server hostname, description, seed, or player limits anytime while the server is stopped.
+* 
