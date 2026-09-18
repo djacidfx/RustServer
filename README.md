@@ -1,150 +1,143 @@
-# Rust Dedicated Server Manager (PowerShell)
+# 🛠️ Rust Dedicated Server Manager for Windows
 
-Interactive installer and day-to-day management scripts for running a
-[Rust](https://rust.facepunch.com/) Dedicated Server on Windows — install
-via SteamCMD, configure the server, and manage it (start/stop/update/wipe),
-with an optional nightly restart and automated wipe schedule.
+A turn-key, beginner-friendly toolset to install, run, update, and automate a [Rust](https://rust.facepunch.com/) Dedicated Server on Windows. 
 
-## Features
+Designed so that **anyone**, regardless of technical experience, can get a server running in minutes without manual command-line wrangling.
 
-- **Guided installer** (`Install-RustServer.ps1`) — asks where to install
-  everything, downloads SteamCMD if needed, installs the Rust Dedicated
-  Server, and walks you through server settings.
-- **Single management script** (`Manage-RustServer.ps1`) for start, stop,
-  restart, update, and wipe actions.
-- **Nightly maintenance** — an optional scheduled task that restarts the
-  server every night and wipes it on whatever schedule you choose
-  (none, daily, weekly, biweekly, or monthly — e.g. "first Thursday of
-  the month", the classic Rust forced-wipe pattern).
-- **JSON config file** — all server settings live in
-  `RustServer.config.json`, so you can hand-edit or regenerate them without
-  touching the scripts.
-- Optional Windows Firewall rule creation for the server/query/RCON ports.
+Official Repository: [https://github.com/djacidfx/RustServer](https://github.com/djacidfx/RustServer)
 
-## Requirements
+---
 
-- Windows 10/11 or Windows Server
-- PowerShell 5.1 or later (PowerShell 7+ also works)
-- Outbound internet access (to download SteamCMD and Rust server files)
-- **Run as Administrator** if you want the installer to create firewall
-  rules and the nightly scheduled task. Everything else works fine without
-  elevation.
+## ✨ Features
 
-## Quick Start
+- **Double-Click Installer (`Install.bat`)**: Automatically installs SteamCMD, downloads the Rust Dedicated Server files, guides you through configuration, and sets up firewall rules.
+- **Interactive Control Menu (`Manage.bat`)**: Start, stop, restart, update, backup, or wipe your server from a simple numbered menu.
+- **Graceful WebRCON Shutdown**: Sends `server.save` and `quit` before stopping, protecting your players' structures and blueprints against rollbacks or world corruption.
+- **Safety Backups Before Wipes**: Automatically archives your world saves and database to a timestamped `.zip` in `backups/` before any wipe.
+- **Automated Nightly Restarts & Wipe Scheduling**: Supports automatic restarts and wipes (Weekly, Bi-Weekly, or First-Thursday Monthly forced wipes).
+- **Independent Configuration**: All server properties are saved in `RustServer.config.json` so you can tweak settings without touching the code.
 
+---
+
+## 📋 System Requirements
+
+| Requirement | Recommended Spec |
+|---|---|
+| **OS** | Windows 10, Windows 11, or Windows Server (64-bit) |
+| **Processor** | Modern Quad-Core CPU (3.6 GHz+) |
+| **RAM** | 16 GB minimum (Rust maps are memory-intensive) |
+| **Disk Space** | 25 GB+ available on an SSD |
+| **Prerequisite** | [Visual C++ 2015–2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
+
+---
+
+## 🚀 Quick Start (Under 5 Minutes)
+
+### 1. Download
+Click the green **Code** button at the top of [https://github.com/djacidfx/RustServer](https://github.com/djacidfx/RustServer) and select **Download ZIP**, then extract it to a folder on your computer.
+
+*(Or clone via Git:)*
 ```powershell
-  git clone https://github.com/djacidfx/RustServer.git
+git clone https://github.com/djacidfx/RustServer.git
 cd RustServer
-
-# Run elevated (Start PowerShell "as Administrator") for firewall +
-# scheduled task support
-.\Install-RustServer.ps1
 ```
 
-Answer the prompts (install location, hostname, ports, RCON password, map
-seed, nightly restart/wipe schedule, etc.). The installer will:
+### 2. Run the Installer
+Right-click `Install.bat` and select **Run as Administrator**.
 
-1. Create the install folders you specified.
-2. Download and bootstrap SteamCMD (skipped if already present).
-3. Install the Rust Dedicated Server (Steam app id `258550`).
-4. Save your settings to `RustServer.config.json`.
-5. Copy `Manage-RustServer.ps1` into the install folder.
-6. Optionally open firewall ports and register the nightly scheduled task.
-7. Optionally start the server right away.
+Follow the on-screen prompts:
+1. Choose an install directory (e.g., `C:\RustServer`).
+2. SteamCMD and the Rust server files will download automatically.
+3. Choose your server name, description, player count, and map size.
+4. Let the installer create Windows Firewall rules and optional nightly maintenance tasks.
+5. Choose whether to start the server immediately!
 
-## Files in this repo
+---
 
-| File | Purpose |
-|---|---|
-| `Install-RustServer.ps1` | Run once to install and configure everything. |
-| `Manage-RustServer.ps1` | Day-to-day start/stop/restart/update/wipe control. Also what the scheduled task calls for nightly maintenance. |
-| `RustServer.config.example.json` | Example of the generated config file, for reference. Your real one (with your RCON password) is created at install time and is git-ignored. |
+## 🎮 How Players Connect to Your Server
 
-## Using `Manage-RustServer.ps1` directly
+### Connecting Locally (You on the same PC or LAN)
+1. Open Rust on your computer.
+2. Press **F1** to open the in-game console.
+3. Type:
+   ```text
+   client.connect 127.0.0.1:28015
+   ```
+   *(Or your local IP address if playing from another PC in your home, e.g., `client.connect 192.168.1.50:28015`)*
+
+### Letting Friends and the Public Connect (Port Forwarding)
+For friends outside your house to find or join your server, you must forward these ports in your home router settings to your computer's local IP address:
+
+| Port | Protocol | Purpose |
+|---|---|---|
+| **28015** | **UDP** | Main Game Port |
+| **28017** | **UDP** | Steam Server Query Port (Server Browser) |
+| **28016** | **TCP** | WebRCON Administration Port |
+
+Once forwarded, friends can join via the community browser or in console via:
+```text
+client.connect YOUR_PUBLIC_IP:28015
+```
+*(You can check your public IP on websites like [whatismyip.com](https://whatismyip.com).)*
+
+---
+
+## 🕹️ Day-to-Day Management
+
+Double-click `Manage.bat` to open the control menu:
+
+```text
+==========================================================
+             Rust Dedicated Server Manager
+==========================================================
+Server: My Rust Community Server
+Status: ONLINE (PID: 14220)
+==========================================================
+ [1] Start Server
+ [2] Stop Server (Graceful Save & Quit)
+ [3] Restart Server
+ [4] Update Server (SteamCMD)
+ [5] Backup Server Data
+ [6] Wipe Server (Map Wipe - Keep Blueprints)
+ [7] Wipe Server (Full Wipe - Reset Everything)
+ [8] View Detailed Status & Port Info
+ [9] Open Server Log File
+ [Q] Quit
+==========================================================
+```
+
+### Command-Line Arguments (Advanced / Automation)
 
 ```powershell
 .\Manage-RustServer.ps1 -Action start
 .\Manage-RustServer.ps1 -Action stop
 .\Manage-RustServer.ps1 -Action restart
 .\Manage-RustServer.ps1 -Action update
-.\Manage-RustServer.ps1 -Action wipe              # prompts for confirmation
-.\Manage-RustServer.ps1 -Action wipe -ForceWipe   # skips confirmation
-.\Manage-RustServer.ps1 -Action nightly           # used by the scheduled task
-.\Manage-RustServer.ps1 -Action generate-config   # re-run the settings wizard
+.\Manage-RustServer.ps1 -Action backup
+.\Manage-RustServer.ps1 -Action wipe -WipeType MapOnly
+.\Manage-RustServer.ps1 -Action wipe -WipeType Full
+.\Manage-RustServer.ps1 -Action status
 ```
 
-By default it looks for `RustServer.config.json` next to the script. Point
-it elsewhere with `-ConfigPath`:
+---
 
+## 🔄 Wipe & Restart Automation
+
+If enabled during setup, Windows Task Scheduler automatically runs:
 ```powershell
-.\Manage-RustServer.ps1 -Action start -ConfigPath "D:\Servers\Main\RustServer.config.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Manage-RustServer.ps1" -Action nightly
 ```
+- **Regular Nights**: Cleanly saves and restarts the server to free memory and prevent lag.
+- **Wipe Nights**: Automatically takes a full backup to `backups/`, wipes world saves, picks a random fresh seed, and boots the new map.
 
-## Configuration reference
+---
 
-`RustServer.config.json` (see `RustServer.config.example.json`):
+## 🔒 Security
 
-| Field | Description |
-|---|---|
-| `SteamCmdPath` | Folder containing `steamcmd.exe`. |
-| `RustServerRootPath` | Top-level install folder for this server instance — contains `SteamCmdPath`, `RustGamePath`, the config file, and the log. |
-| `RustGamePath` | Sub-folder (under the root) where the actual Rust Dedicated Server is installed — `RustDedicated.exe`, the map, and player/save data. |
-| `ServerIdentity` | Save-data folder name under `rust_game\server\`. |
-| `RCONPassword` | RCON password. Auto-generated by the wizard if left blank. |
-| `ServerPort` / `QueryPort` / `RCONPort` | Network ports. |
-| `WorldSize` / `Seed` | Procedural map size and seed. |
-| `MaxPlayers` | Player slot count. |
-| `Hostname` / `Description` / `HeaderImage` / `ServerURL` | Server-browser metadata. |
-| `Level` / `LevelURL` | Map type, or a custom map download URL. |
-| `SaveInterval` / `TickRate` | Save frequency (seconds) and simulation tick rate. |
-| `NightlyRestartEnabled` | Whether the nightly maintenance task should do anything. |
-| `NightlyRestartTime` | 24-hour `HH:mm` time the scheduled task fires. |
-| `WipeSchedule` | `None`, `Daily`, `Weekly`, `BiWeekly`, or `Monthly`. |
-| `WipeDayOfWeek` | Day used by `Weekly` / `BiWeekly` / `Monthly`. |
-| `WipeWeekOfMonth` | `First`/`Second`/`Third`/`Fourth`/`Last`, used by `Monthly`. |
+- `RustServer.config.json` stores your generated RCON password. This file is excluded in `.gitignore` so your private credentials are never pushed to GitHub.
 
-On every wipe, the seed is randomized automatically and the config file is
-updated so the next server start generates a fresh map.
+---
 
-## Nightly maintenance
+## 📄 License
 
-If enabled, the installer registers a scheduled task that runs
-`Manage-RustServer.ps1 -Action nightly` once a day at the time you chose.
-That action checks whether today matches your `WipeSchedule` — if so it
-wipes, otherwise it just restarts. You can change the schedule any time by
-editing `RustServer.config.json` or re-running
-`.\Manage-RustServer.ps1 -Action generate-config`.
-
-## Security notes
-
-- `RustServer.config.json` contains your RCON password in plain text.
-  **Don't commit your real one** — the included `.gitignore` already
-  excludes it. Commit `RustServer.config.example.json` instead if you want
-  to share your setup.
-- `Manage-RustServer.ps1 -Action stop` currently force-terminates the
-  server process rather than sending a graceful RCON shutdown command. If
-  you have an RCON client available, consider wiring that in before
-  `Stop-Process` for cleaner shutdowns.
-- The scheduled task (when created by an elevated install) runs as
-  `SYSTEM`. Adjust the principal in `Install-RustServer.ps1` if you'd
-  rather run it under a specific service account.
-
-## Troubleshooting
-
-- **SteamCMD download fails** — the installer downloads from
-  `https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip`. If
-  Valve's CDN is unreachable from your network, download SteamCMD manually
-  and extract it to the `SteamCmdPath` folder you specified, then re-run
-  the installer (it will detect the existing install and skip the
-  download).
-- **Ports not opening / players can't connect** — re-run the installer
-  elevated so it can create the Windows Firewall rules, or open
-  `ServerPort`/`QueryPort` (UDP) and `RCONPort` (TCP) manually, and forward
-  them on your router if applicable.
-- **Scheduled task wasn't created** — this only happens when the installer
-  is run as Administrator. Re-run elevated, or create the task yourself
-  (see the warning message the installer prints for the exact command).
-
-## License
-
-See [LICENSE](LICENSE).
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

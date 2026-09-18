@@ -1,47 +1,38 @@
 <#
 .SYNOPSIS
-    Centralized PowerShell script for Rust Dedicated Server management.
+    Centralized Rust Dedicated Server Manager on Windows.
 
 .DESCRIPTION
-    Handles starting, stopping, restarting, updating, and wiping a Rust
-    Dedicated Server. Settings are loaded from RustServer.config.json,
-    which is normally created by Install-RustServer.ps1 (or by running
-    this script once with -Action generate-config).
+    Provides automated start, stop, graceful save/shutdown via WebRCON,
+    update, backup, wipe, and scheduled maintenance.
+    If run with no arguments, opens an interactive, numbered control menu.
 
 .PARAMETER Action
-    One of: start, stop, restart, update, wipe, nightly, generate-config
+    start, stop, restart, update, backup, wipe, nightly, generate-config, status
+
+.PARAMETER WipeType
+    MapOnly (preserves blueprints) or Full (erases all data and blueprints). Default: MapOnly.
 
 .PARAMETER ForceWipe
-    Skip the confirmation prompt for the 'wipe' action.
+    Skips user confirmation for wipes (used by automated tasks).
 
 .PARAMETER ConfigPath
-    Path to the JSON config file. Defaults to RustServer.config.json next
-    to this script.
-
-.EXAMPLE
-    .\Manage-RustServer.ps1 -Action start
-
-.EXAMPLE
-    .\Manage-RustServer.ps1 -Action wipe -ForceWipe
-
-.EXAMPLE
-    .\Manage-RustServer.ps1 -Action nightly
-    # Used by the scheduled task created by Install-RustServer.ps1.
-    # Decides whether tonight is a restart night or a wipe night based on
-    # the WipeSchedule settings in the config file.
+    Path to the JSON config file.
 #>
 
 param(
-    [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'update', 'wipe', 'nightly', 'generate-config')]
-    [string]$Action,
+    [Parameter(Position = 0)]
+    [ValidateSet('start', 'stop', 'restart', 'update', 'backup', 'wipe', 'nightly', 'generate-config', 'status', '')]
+    [string]$Action = '',
+
+    [ValidateSet('MapOnly', 'Full')]
+    [string]$WipeType = 'MapOnly',
 
     [switch]$ForceWipe,
 
     [string]$ConfigPath = (Join-Path $PSScriptRoot "RustServer.config.json")
 )
 
-# --- Default configuration (used until a config file is loaded/created) ---
 $Script:Config = [ordered]@{
     SteamCmdPath          = "C:\RustServer\SteamCMD"
     RustServerRootPath    = "C:\RustServer"
@@ -51,10 +42,10 @@ $Script:Config = [ordered]@{
     ServerPort            = 28015
     RCONPort              = 28016
     QueryPort             = 28017
-    WorldSize             = 4500
+    WorldSize             = 4250
     Seed                  = 12345
-    MaxPlayers            = 150
-    Hostname              = "My Awesome Rust Server"
+    MaxPlayers            = 100
+    Hostname              = "My Rust Community Server"
     Description           = "A friendly Rust server."
     HeaderImage           = ""
     ServerURL             = ""
@@ -62,17 +53,15 @@ $Script:Config = [ordered]@{
     LevelURL              = ""
     SaveInterval          = 300
     TickRate              = 30
-
-    # Nightly maintenance schedule (used by the 'nightly' action)
     NightlyRestartEnabled = $true
     NightlyRestartTime    = "04:00"
-    WipeSchedule          = "None"       # None | Daily | Weekly | BiWeekly | Monthly
+    WipeSchedule          = "None"
     WipeDayOfWeek         = "Thursday"
-    WipeWeekOfMonth       = "First"      # First | Second | Third | Fourth | Last
+    WipeWeekOfMonth       = "First"
 }
 
 # ============================================================
-# Config load / save / wizard
+# Config Helpers
 # ============================================================
 
 function Import-RustServerConfig {
@@ -85,10 +74,10 @@ function Import-RustServerConfig {
                 }
             }
         } catch {
-            Write-Warning "Failed to parse '$ConfigPath' - falling back to defaults. $_"
+            Write-Warning "Failed to parse '$ConfigPath' - using default values: $_"
         }
     } else {
-        Write-Warning "No config file found at '$ConfigPath'. Using built-in defaults. Run with -Action generate-config to create one, or use Install-RustServer.ps1."
+        Write-Warning "Config file not found at '$ConfigPath'. Using defaults."
     }
 }
 
@@ -101,95 +90,15 @@ function Save-RustServerConfig {
     Write-Host "Configuration saved to $ConfigPath" -ForegroundColor Green
 }
 
-function Read-Default {
-    param([string]$Prompt, $Default)
-    $val = Read-Host "$Prompt [$Default]"
-    if ([string]::IsNullOrWhiteSpace($val)) { return $Default }
-    return $val
-}
-
-function New-RustServerConfigInteractive {
-    Write-Host ""
-    Write-Host "=== Rust Server Configuration Wizard ===" -ForegroundColor Cyan
-    Write-Host "Press Enter to accept the default shown in [brackets]." -ForegroundColor DarkGray
-    Write-Host ""
-
-    $Script:Config.RustServerRootPath = Read-Default "Install root folder" $Script:Config.RustServerRootPath
-    $Script:Config.SteamCmdPath       = Read-Default "SteamCMD folder" (Join-Path $Script:Config.RustServerRootPath "SteamCMD")
-    $Script:Config.RustGamePath       = Read-Default "Rust game folder" (Join-Path $Script:Config.RustServerRootPath "rust_game")
-    $Script:Config.ServerIdentity     = Read-Default "Server identity name" $Script:Config.ServerIdentity
-    $Script:Config.Hostname           = Read-Default "Server hostname" $Script:Config.Hostname
-    $Script:Config.Description        = Read-Default "Server description" $Script:Config.Description
-    $Script:Config.ServerPort         = [int](Read-Default "Server port" $Script:Config.ServerPort)
-    $Script:Config.QueryPort          = [int](Read-Default "Query port" $Script:Config.QueryPort)
-    $Script:Config.RCONPort           = [int](Read-Default "RCON port" $Script:Config.RCONPort)
-
-    $rconPass = Read-Host "RCON password [leave blank to auto-generate]"
-    if ([string]::IsNullOrWhiteSpace($rconPass)) {
-        $rconPass = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 16 | ForEach-Object { [char]$_ })
-        Write-Host "Generated RCON password: $rconPass" -ForegroundColor Yellow
-    }
-    $Script:Config.RCONPassword = $rconPass
-
-    $Script:Config.MaxPlayers = [int](Read-Default "Max players" $Script:Config.MaxPlayers)
-    $Script:Config.WorldSize  = [int](Read-Default "World size" $Script:Config.WorldSize)
-
-    $seedInput = Read-Host "Map seed [leave blank for random]"
-    if ([string]::IsNullOrWhiteSpace($seedInput)) {
-        $Script:Config.Seed = Get-Random -Minimum 1 -Maximum 999999999
-        Write-Host "Generated seed: $($Script:Config.Seed)" -ForegroundColor Yellow
-    } else {
-        $Script:Config.Seed = [int]$seedInput
-    }
-
-    Write-Host ""
-    Write-Host "Map type: 'Procedural Map', 'Barren', 'CraggyIsland', 'HapisIsland' - or leave blank to use a custom map URL"
-    $Script:Config.Level = Read-Default "Map type" $Script:Config.Level
-    if ([string]::IsNullOrWhiteSpace($Script:Config.Level)) {
-        $Script:Config.LevelURL = Read-Host "Custom map download URL"
-    }
-
-    $Script:Config.SaveInterval = [int](Read-Default "Save interval (seconds)" $Script:Config.SaveInterval)
-    $Script:Config.TickRate     = [int](Read-Default "Tick rate" $Script:Config.TickRate)
-
-    Write-Host ""
-    Write-Host "=== Nightly Maintenance Schedule ===" -ForegroundColor Cyan
-    $nightlyAns = Read-Default "Enable nightly restart? (y/n)" $(if ($Script:Config.NightlyRestartEnabled) { "y" } else { "n" })
-    $Script:Config.NightlyRestartEnabled = ($nightlyAns -match '^(y|yes)$')
-
-    if ($Script:Config.NightlyRestartEnabled) {
-        $Script:Config.NightlyRestartTime = Read-Default "Nightly restart time (24h HH:mm)" $Script:Config.NightlyRestartTime
-
-        Write-Host "Wipe schedule options: None, Daily, Weekly, BiWeekly, Monthly"
-        $Script:Config.WipeSchedule = Read-Default "Wipe schedule" $Script:Config.WipeSchedule
-
-        if ($Script:Config.WipeSchedule -in @('Weekly', 'BiWeekly', 'Monthly')) {
-            $Script:Config.WipeDayOfWeek = Read-Default "Wipe day of week" $Script:Config.WipeDayOfWeek
-        }
-        if ($Script:Config.WipeSchedule -eq 'Monthly') {
-            Write-Host "Week-of-month options: First, Second, Third, Fourth, Last"
-            $Script:Config.WipeWeekOfMonth = Read-Default "Which occurrence in the month" $Script:Config.WipeWeekOfMonth
-        }
-    }
-
-    Save-RustServerConfig
-}
-
-# ============================================================
-# Derived paths
-# ============================================================
-
 function Get-DerivedPaths {
+    $backupDir = Join-Path $Script:Config.RustServerRootPath "backups"
     [PSCustomObject]@{
         Executable         = Join-Path $Script:Config.RustGamePath "RustDedicated.exe"
         ServerIdentityPath = Join-Path $Script:Config.RustGamePath "server\$($Script:Config.ServerIdentity)"
-        LogFile            = Join-Path $Script:Config.RustGamePath "server\$($Script:Config.ServerIdentity)\$($Script:Config.ServerIdentity)_logs.txt"
+        LogFile            = Join-Path $Script:Config.RustGamePath "server\$($Script:Config.ServerIdentity)\$($Script:Config.ServerIdentity)_log.txt"
+        BackupFolder       = $backupDir
     }
 }
-
-# ============================================================
-# Helpers
-# ============================================================
 
 function Write-Log {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -205,29 +114,86 @@ function Write-Log {
 
 function Get-RustServerProcess {
     $paths = Get-DerivedPaths
-    Get-Process -Name "RustDedicated" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $paths.Executable }
+    Get-Process -Name "RustDedicated" -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -eq $paths.Executable -or $_.MainModule.FileName -eq $paths.Executable
+        } catch {
+            $true
+        }
+    }
 }
 
 # ============================================================
-# Core server management
+# Graceful WebRCON Client (PowerShell Native)
+# ============================================================
+
+function Send-RconCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $rconPort = $Script:Config.RCONPort
+    $rconPass = $Script:Config.RCONPassword
+
+    try {
+        $ws = New-Object System.Net.WebSockets.ClientWebSocket
+        $cts = New-Object System.Threading.CancellationTokenSource
+        $cts.CancelAfter([TimeSpan]::FromSeconds($TimeoutSeconds))
+
+        $uri = [System.Uri]"ws://127.0.0.1:$rconPort/$rconPass"
+        $connectTask = $ws.ConnectAsync($uri, $cts.Token)
+        $connectTask.Wait()
+
+        if ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+            $payload = @{
+                Identifier = 1001
+                Message    = $Command
+                Name       = "WebRcon"
+            } | ConvertTo-Json -Compress
+
+            $buffer = [System.Text.Encoding]::UTF8.GetBytes($payload)
+            $segment = New-Object System.ArraySegment[byte] -ArgumentList @($buffer, 0, $buffer.Length)
+            $sendTask = $ws.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token)
+            $sendTask.Wait()
+
+            Start-Sleep -Milliseconds 500
+            $closeTask = $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "Done", $cts.Token)
+            $closeTask.Wait()
+            return $true
+        }
+    } catch {
+        # Fallback if WebSocket connection cannot be established
+        return $false
+    }
+    return $false
+}
+
+# ============================================================
+# Core Server Actions
 # ============================================================
 
 function Start-RustServer {
     $paths = Get-DerivedPaths
-    Write-Log "Attempting to start Rust server."
+    Write-Log "Checking Rust server status..."
 
     if (Get-RustServerProcess) {
-        Write-Log "RustDedicated process already running."
+        Write-Log "RustDedicated is already running."
         return
     }
 
     if (-not (Test-Path $paths.Executable)) {
-        Write-Log "ERROR: RustDedicated.exe not found at $($paths.Executable). Aborting start."
+        Write-Log "ERROR: RustDedicated.exe not found at $($paths.Executable). Please update/install first."
         return
     }
 
-    Write-Log "Starting RustDedicated.exe..."
+    Write-Log "Starting RustDedicated.exe in background..."
     Set-Location $Script:Config.RustGamePath
+
+    # Ensure identity directory exists for logs
+    if (-not (Test-Path $paths.ServerIdentityPath)) {
+        New-Item -ItemType Directory -Path $paths.ServerIdentityPath -Force | Out-Null
+    }
 
     $arguments = @(
         "-batchmode",
@@ -263,50 +229,60 @@ function Start-RustServer {
         $arguments += "+server.url `"$($Script:Config.ServerURL)`""
     }
 
-    Start-Process -FilePath $paths.Executable -ArgumentList $arguments -NoNewWindow -PassThru | Out-Null
+    Start-Process -FilePath $paths.Executable -ArgumentList $arguments -NoNewWindow | Out-Null
 
+    Write-Host "Waiting for server process initialization (10 seconds)..." -ForegroundColor Gray
     Start-Sleep -Seconds 10
+
     if (Get-RustServerProcess) {
-        Write-Log "Rust server started successfully."
+        Write-Log "Rust Dedicated Server successfully started."
     } else {
-        Write-Log "ERROR: Rust server failed to start."
+        Write-Log "ERROR: Rust server process exited unexpectedly. Check $($paths.LogFile) for error details."
     }
 }
 
 function Stop-RustServer {
-    Write-Log "Attempting to stop Rust server."
+    Write-Log "Stopping Rust server..."
     $process = Get-RustServerProcess
 
     if (-not $process) {
-        Write-Log "RustDedicated process not found or already stopped."
+        Write-Log "RustDedicated process is not running."
         return
     }
 
-    # Note: this force-terminates the process. For a graceful shutdown, send
-    # the 'quit' or 'server.save' RCON command via an RCON client before
-    # calling this, then give the server a few seconds to exit on its own.
-    Write-Log "Terminating RustDedicated process."
-    Stop-Process -InputObject $process -Force -ErrorAction SilentlyContinue
+    # Attempt 1: Graceful save & quit via WebRCON
+    Write-Log "Attempting graceful save and shutdown via WebRCON..."
+    $saveOk = Send-RconCommand -Command "server.save"
+    if ($saveOk) {
+        Send-RconCommand -Command "quit"
+        Write-Log "Sent 'server.save' and 'quit' commands. Waiting for server to exit cleanly..."
+        $process | Wait-Process -Timeout 20 -ErrorAction SilentlyContinue
+    }
 
-    $process | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
+    # Attempt 2: If process is still active, terminate cleanly
+    if (Get-RustServerProcess) {
+        Write-Log "Process did not exit after WebRCON command. Terminating process directly..."
+        Stop-Process -InputObject $process -Force -ErrorAction SilentlyContinue
+        $process | Wait-Process -Timeout 15 -ErrorAction SilentlyContinue
+    }
 
     if (-not (Get-RustServerProcess)) {
         Write-Log "RustDedicated process stopped successfully."
     } else {
-        Write-Log "WARNING: RustDedicated process might still be running after force termination."
+        Write-Log "WARNING: Process could not be stopped."
     }
 }
 
 function Restart-RustServer {
-    Write-Log "Initiating Rust server restart."
+    Write-Log "Restarting Rust server..."
     Stop-RustServer
-    Start-Sleep -Seconds 15
+    Start-Sleep -Seconds 5
     Start-RustServer
-    Write-Log "Rust server restart completed."
+    Write-Log "Restart complete."
 }
 
 function Update-RustServer {
-    Write-Log "Initiating Rust server update."
+    Write-Log "Starting server update via SteamCMD..."
     Stop-RustServer
 
     $steamCmdExe = Join-Path $Script:Config.SteamCmdPath "steamcmd.exe"
@@ -315,57 +291,119 @@ function Update-RustServer {
         return
     }
 
-    Write-Log "Running SteamCMD update..."
     Set-Location $Script:Config.SteamCmdPath
     & $steamCmdExe +force_install_dir "$($Script:Config.RustGamePath)" +login anonymous +app_update 258550 validate +quit
 
     if ($LASTEXITCODE -eq 0) {
-        Write-Log "Rust server files updated successfully."
+        Write-Log "Rust server updated successfully."
     } else {
-        Write-Log "ERROR: SteamCMD update failed with exit code $LASTEXITCODE."
+        Write-Log "ERROR: SteamCMD update exited with code $LASTEXITCODE."
     }
 
     Start-RustServer
-    Write-Log "Rust server update completed."
+}
+
+function Backup-RustServerData {
+    $paths = Get-DerivedPaths
+    if (-not (Test-Path $paths.ServerIdentityPath)) {
+        Write-Log "No save data found to back up in $($paths.ServerIdentityPath)."
+        return
+    }
+
+    if (-not (Test-Path $paths.BackupFolder)) {
+        New-Item -ItemType Directory -Path $paths.BackupFolder -Force | Out-Null
+    }
+
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $zipName = "Backup-$($Script:Config.ServerIdentity)-$timestamp.zip"
+    $zipPath = Join-Path $paths.BackupFolder $zipName
+
+    Write-Log "Creating backup: $zipPath..."
+    try {
+        Compress-Archive -Path "$($paths.ServerIdentityPath)\*" -DestinationPath $zipPath -Force
+        Write-Log "Backup completed successfully ($zipName)."
+    } catch {
+        Write-Log "WARNING: Failed to create zip backup: $_"
+    }
 }
 
 function Wipe-RustServer {
-    param([switch]$Force)
+    param(
+        [string]$Type = "MapOnly",
+        [switch]$Force
+    )
 
     $paths = Get-DerivedPaths
-    Write-Log "Initiating Rust server wipe process."
+    Write-Log "Initiating server wipe ($Type)..."
 
     if (-not $Force) {
-        $response = Read-Host "Are you sure you want to wipe the server? This will delete all player data and map files! (Type 'YES' to confirm)"
-        if ($response -ne "YES") {
+        Write-Host ""
+        Write-Host "WARNING: A wipe will erase the current map and player structures." -ForegroundColor Red
+        if ($Type -eq "Full") {
+            Write-Host "FULL WIPE SELECTED: Player blueprints and tech-tree unlocks will ALSO be erased." -ForegroundColor Red
+        } else {
+            Write-Host "MAP WIPE SELECTED: Player blueprints will be PRESERVED." -ForegroundColor Green
+        }
+        $confirm = Read-Host "Type 'YES' to proceed with wiping"
+        if ($confirm -ne "YES") {
             Write-Log "Server wipe cancelled by user."
             return
         }
     }
 
+    # Always create a backup before wiping for safety!
     Stop-RustServer
+    Backup-RustServerData
 
-    Write-Log "Deleting server data in $($paths.ServerIdentityPath)..."
+    Write-Log "Removing map and world save files in $($paths.ServerIdentityPath)..."
     Get-ChildItem -Path $paths.ServerIdentityPath -Filter "*.sav" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
     Get-ChildItem -Path $paths.ServerIdentityPath -Filter "*.map" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
     Get-ChildItem -Path $paths.ServerIdentityPath -Filter "*.db" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-
-    Remove-Item -Path "$($paths.ServerIdentityPath)\player.blueprints*" -ErrorAction SilentlyContinue -Force
-    Remove-Item -Path "$($paths.ServerIdentityPath)\player.data*" -ErrorAction SilentlyContinue -Force
-    Remove-Item -Path "$($paths.ServerIdentityPath)\pvp.stats*" -ErrorAction SilentlyContinue -Force
     Remove-Item -Path "$($paths.ServerIdentityPath)\storage\*" -Recurse -ErrorAction SilentlyContinue -Force
 
-    # Change the seed so the new map isn't identical to the old one
-    $Script:Config.Seed = Get-Random -Minimum 1 -Maximum 999999999
-    Save-RustServerConfig
-    Write-Log "Server seed changed to $($Script:Config.Seed) for the new map."
+    if ($Type -eq "Full") {
+        Write-Log "Erasing player blueprints, data, and stats (Full Wipe)..."
+        Remove-Item -Path "$($paths.ServerIdentityPath)\player.blueprints*" -ErrorAction SilentlyContinue -Force
+        Remove-Item -Path "$($paths.ServerIdentityPath)\player.data*" -ErrorAction SilentlyContinue -Force
+        Remove-Item -Path "$($paths.ServerIdentityPath)\pvp.stats*" -ErrorAction SilentlyContinue -Force
+    }
 
-    Write-Log "Server data wiped. Starting server again."
+    # Generate a fresh seed for the new map
+    $Script:Config.Seed = Get-Random -Minimum 100000 -Maximum 999999999
+    Save-RustServerConfig
+    Write-Log "Generated new map seed: $($Script:Config.Seed)"
+
+    Write-Log "Wipe finished. Starting server with new map..."
     Start-RustServer
 }
 
+function Show-ServerStatus {
+    $paths = Get-DerivedPaths
+    $proc = Get-RustServerProcess
+
+    Write-Host ""
+    Write-Host "=== Rust Server Status ===" -ForegroundColor Cyan
+    if ($proc) {
+        $workingSetMb = [math]::Round($proc.WorkingSet64 / 1MB, 1)
+        Write-Host "State:         ONLINE" -ForegroundColor Green
+        Write-Host "Process ID:    $($proc.Id)"
+        Write-Host "Memory Usage:  $workingSetMb MB"
+        Write-Host "Start Time:    $($proc.StartTime)"
+    } else {
+        Write-Host "State:         OFFLINE" -ForegroundColor Red
+    }
+    Write-Host "Hostname:      $($Script:Config.Hostname)"
+    Write-Host "Identity:      $($Script:Config.ServerIdentity)"
+    Write-Host "Game Port:     $($Script:Config.ServerPort) (UDP)"
+    Write-Host "Query Port:    $($Script:Config.QueryPort) (UDP)"
+    Write-Host "RCON Port:     $($Script:Config.RCONPort) (TCP)"
+    Write-Host "Map Seed:      $($Script:Config.Seed) | Size: $($Script:Config.WorldSize)"
+    Write-Host "Log File:      $($paths.LogFile)"
+    Write-Host ""
+}
+
 # ============================================================
-# Nightly maintenance - decides restart vs. wipe
+# Scheduled Maintenance (Restart vs. Wipe)
 # ============================================================
 
 function Test-IsWipeDay {
@@ -382,14 +420,16 @@ function Test-IsWipeDay {
 
         'BiWeekly' {
             if ($today.DayOfWeek.ToString() -ne $Script:Config.WipeDayOfWeek) { return $false }
-            $week = [System.Globalization.ISOWeek]::GetWeekOfYear($today)
+            # Compatible with both Windows PowerShell 5.1 and PS 7+
+            $culture = [System.Globalization.CultureInfo]::InvariantCulture
+            $week = $culture.Calendar.GetWeekOfYear($today, [System.Globalization.CalendarWeekRule]::FirstFourDayWeek, [DayOfWeek]::Monday)
             return ($week % 2) -eq 0
         }
 
         'Monthly' {
             if ($today.DayOfWeek.ToString() -ne $Script:Config.WipeDayOfWeek) { return $false }
-            # Find every date in this month matching the target day of week
-            $matches = 1..([DateTime]::DaysInMonth($today.Year, $today.Month)) |
+            $daysInMonth = [DateTime]::DaysInMonth($today.Year, $today.Month)
+            $matches = 1..$daysInMonth |
                 ForEach-Object { Get-Date -Year $today.Year -Month $today.Month -Day $_ } |
                 Where-Object { $_.DayOfWeek.ToString() -eq $Script:Config.WipeDayOfWeek }
 
@@ -409,33 +449,92 @@ function Test-IsWipeDay {
 
 function Invoke-NightlyMaintenance {
     if (-not $Script:Config.NightlyRestartEnabled) {
-        Write-Log "Nightly maintenance is disabled in config - skipping."
+        Write-Log "Nightly maintenance is disabled in config."
         return
     }
 
     if (Test-IsWipeDay) {
-        Write-Log "Tonight is a scheduled wipe night ($($Script:Config.WipeSchedule))."
-        Wipe-RustServer -Force
+        Write-Log "Scheduled maintenance: Today is a WIPE day ($($Script:Config.WipeSchedule))."
+        Wipe-RustServer -Type "MapOnly" -Force
     } else {
-        Write-Log "Tonight is a normal restart night."
+        Write-Log "Scheduled maintenance: Performing regular nightly restart."
         Restart-RustServer
     }
 }
 
 # ============================================================
-# Entry point
+# Interactive Menu
 # ============================================================
 
-if ($Action -ne 'generate-config') {
+function Show-Menu {
     Import-RustServerConfig
+    while ($true) {
+        $proc = Get-RustServerProcess
+        $statusText = if ($proc) { "ONLINE (PID: $($proc.Id))" } else { "OFFLINE" }
+        $statusColor = if ($proc) { "Green" } else { "Red" }
+
+        Clear-Host
+        Write-Host "==========================================================" -ForegroundColor Cyan
+        Write-Host "             Rust Dedicated Server Manager                " -ForegroundColor Cyan
+        Write-Host "==========================================================" -ForegroundColor Cyan
+        Write-Host "Server: $($Script:Config.Hostname)" -ForegroundColor White
+        Write-Host "Status: " -NoNewline
+        Write-Host $statusText -ForegroundColor $statusColor
+        Write-Host "==========================================================" -ForegroundColor Cyan
+        Write-Host " [1] Start Server"
+        Write-Host " [2] Stop Server (Graceful Save & Quit)"
+        Write-Host " [3] Restart Server"
+        Write-Host " [4] Update Server (SteamCMD)"
+        Write-Host " [5] Backup Server Data"
+        Write-Host " [6] Wipe Server (Map Wipe - Keep Blueprints)"
+        Write-Host " [7] Wipe Server (Full Wipe - Reset Everything)"
+        Write-Host " [8] View Detailed Status & Port Info"
+        Write-Host " [9] Open Server Log File"
+        Write-Host " [Q] Quit"
+        Write-Host "==========================================================" -ForegroundColor Cyan
+
+        $choice = Read-Host "Select an option [1-9, Q]"
+        switch ($choice) {
+            "1" { Start-RustServer; Pause }
+            "2" { Stop-RustServer; Pause }
+            "3" { Restart-RustServer; Pause }
+            "4" { Update-RustServer; Pause }
+            "5" { Backup-RustServerData; Pause }
+            "6" { Wipe-RustServer -Type "MapOnly"; Pause }
+            "7" { Wipe-RustServer -Type "Full"; Pause }
+            "8" { Show-ServerStatus; Pause }
+            "9" {
+                $paths = Get-DerivedPaths
+                if (Test-Path $paths.LogFile) {
+                    Start-Process notepad.exe $paths.LogFile
+                } else {
+                    Write-Host "Log file does not exist yet at $($paths.LogFile)" -ForegroundColor Yellow
+                    Pause
+                }
+            }
+            "Q" { exit 0 }
+            "q" { exit 0 }
+        }
+    }
 }
 
-switch ($Action) {
-    "start"           { Start-RustServer }
-    "stop"            { Stop-RustServer }
-    "restart"         { Restart-RustServer }
-    "update"          { Update-RustServer }
-    "wipe"            { Wipe-RustServer -Force:$ForceWipe }
-    "nightly"         { Invoke-NightlyMaintenance }
-    "generate-config" { Import-RustServerConfig; New-RustServerConfigInteractive }
+# ============================================================
+# Main Dispatcher
+# ============================================================
+
+Import-RustServerConfig
+
+if ([string]::IsNullOrWhiteSpace($Action)) {
+    Show-Menu
+} else {
+    switch ($Action) {
+        "start"           { Start-RustServer }
+        "stop"            { Stop-RustServer }
+        "restart"         { Restart-RustServer }
+        "update"          { Update-RustServer }
+        "backup"          { Backup-RustServerData }
+        "wipe"            { Wipe-RustServer -Type $WipeType -Force:$ForceWipe }
+        "nightly"         { Invoke-NightlyMaintenance }
+        "status"          { Show-ServerStatus }
+    }
 }

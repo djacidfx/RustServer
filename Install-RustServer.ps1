@@ -1,23 +1,16 @@
 <#
 .SYNOPSIS
-    Interactive installer/setup wizard for a Rust Dedicated Server on Windows.
+    Beginner-friendly interactive setup wizard for a Rust Dedicated Server on Windows.
 
 .DESCRIPTION
-    - Asks where you want everything installed.
-    - Downloads and installs SteamCMD if it isn't already present.
-    - Installs (or updates) the Rust Dedicated Server via SteamCMD.
-    - Walks you through server settings (hostname, ports, RCON password,
-      map/seed, etc.) and saves them to RustServer.config.json.
-    - Optionally opens the required firewall ports.
-    - Optionally creates a Windows scheduled task for a nightly restart,
-      with an optional wipe schedule (daily / weekly / biweekly / monthly).
-    - Copies Manage-RustServer.ps1 (the day-to-day start/stop/update/wipe
-      script) next to the install, wired up to the config it just created.
-
-.NOTES
-    Run this from an elevated (Administrator) PowerShell window so it can
-    create firewall rules and the scheduled task. It will still work
-    without elevation, just skipping those two steps.
+    - Verifies system requirements (admin privileges, disk space, prerequisites).
+    - Downloads and bootstraps SteamCMD automatically if not found.
+    - Downloads/updates the Rust Dedicated Server (Steam App ID 258550).
+    - Guides users through configuration prompts with sensible defaults.
+    - Saves settings to RustServer.config.json.
+    - Optionally opens required Windows Firewall ports (28015 UDP, 28016 TCP, 28017 UDP).
+    - Optionally creates a Windows Scheduled Task for nightly restart and automated wipes.
+    - Creates desktop shortcuts for easy access.
 #>
 
 [CmdletBinding()]
@@ -25,9 +18,18 @@ param()
 
 $ErrorActionPreference = "Stop"
 
+function Write-Banner {
+    Clear-Host
+    Write-Host "==========================================================" -ForegroundColor Cyan
+    Write-Host "       Rust Dedicated Server - Installation Wizard        " -ForegroundColor Cyan
+    Write-Host "         https://github.com/djacidfx/RustServer           " -ForegroundColor DarkCyan
+    Write-Host "==========================================================" -ForegroundColor Cyan
+    Write-Host ""
+}
+
 function Write-Step($msg) {
     Write-Host ""
-    Write-Host ">> $msg" -ForegroundColor Cyan
+    Write-Host ">> $msg" -ForegroundColor Green
 }
 
 function Read-Default {
@@ -43,136 +45,141 @@ function Test-IsAdmin {
     return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "   Rust Dedicated Server - Installer / Setup Wizard" -ForegroundColor Green
-Write-Host "==========================================================" -ForegroundColor Green
+Write-Banner
 
+# ------------------------------------------------------------
+# Pre-flight Checks
+# ------------------------------------------------------------
 $isAdmin = Test-IsAdmin
 if (-not $isAdmin) {
-    Write-Warning "Not running as Administrator. Firewall rules and the scheduled task will be skipped. Re-run elevated to enable those."
+    Write-Warning "This installer is NOT running as Administrator."
+    Write-Host "Without Administrator privileges, the installer cannot automatically open"
+    Write-Host "firewall ports or set up the nightly auto-wipe scheduled task."
+    $elevate = Read-Default "Would you like to restart the installer as Administrator? (y/n)" "y"
+    if ($elevate -match '^(y|yes)$') {
+        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        exit 0
+    }
 }
 
 # ------------------------------------------------------------
-# 1. Paths
+# 1. Install Locations & Disk Space Check
 # ------------------------------------------------------------
-Write-Step "Where should everything be installed?"
+Write-Step "Step 1: Choose Installation Folder"
+Write-Host "Pick where your Rust server will live. A fast SSD drive is recommended." -ForegroundColor Gray
 
-Write-Host "The install root folder is the top-level folder for this server"
-Write-Host "instance - it holds SteamCMD, the Rust game files, your config file,"
-Write-Host "and the log. Most people only need to set this one and can accept"
-Write-Host "the defaults for the two sub-folders below it."
-Write-Host ""
+$RootPath       = Read-Default "Install root folder" "C:\RustServer"
+$SteamCmdPath   = Read-Default "SteamCMD folder" (Join-Path $RootPath "SteamCMD")
+$RustGamePath   = Read-Default "Rust game folder" (Join-Path $RootPath "rust_game")
+$ServerIdentity = Read-Default "Server identity name (unique folder for map and saves)" "RustServer"
 
-$RootPath = Read-Default "Install root folder (everything else lives under here)" "C:\RustServer"
-
-Write-Host ""
-Write-Host "SteamCMD is Valve's tool used to download/update the Rust server files."
-$SteamCmdPath = Read-Default "SteamCMD folder" (Join-Path $RootPath "SteamCMD")
-
-Write-Host ""
-Write-Host "This is where the actual Rust Dedicated Server (RustDedicated.exe,"
-Write-Host "the map, and player/save data) gets installed - a sub-folder of the"
-Write-Host "install root above, not a separate location."
-$RustGamePath = Read-Default "Rust game folder" (Join-Path $RootPath "rust_game")
-
-$ServerIdentity = Read-Default "Server identity name (save-data folder under rust_game\server\)" "RustServer"
+# Check available disk space on the target drive
+$driveLetter = [System.IO.Path]::GetPathRoot($RootPath).Substring(0, 1)
+$drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+if ($drive) {
+    $freeGb = [math]::Round($drive.Free / 1GB, 1)
+    if ($freeGb -lt 20) {
+        Write-Warning "Drive $driveLetter`: only has $freeGb GB free space. Rust Dedicated Server requires ~15-20 GB."
+    } else {
+        Write-Host "Target drive has $freeGb GB available." -ForegroundColor Gray
+    }
+}
 
 foreach ($p in @($RootPath, $SteamCmdPath, $RustGamePath)) {
     if (-not (Test-Path $p)) {
         New-Item -ItemType Directory -Path $p -Force | Out-Null
-        Write-Host "Created $p"
+        Write-Host "Created directory: $p" -ForegroundColor DarkGray
     }
 }
 
 # ------------------------------------------------------------
-# 2. SteamCMD
+# 2. SteamCMD Setup
 # ------------------------------------------------------------
-Write-Step "SteamCMD"
+Write-Step "Step 2: SteamCMD Setup"
 
 $steamCmdExe = Join-Path $SteamCmdPath "steamcmd.exe"
 if (Test-Path $steamCmdExe) {
-    Write-Host "SteamCMD already present at $steamCmdExe - skipping download."
+    Write-Host "SteamCMD already detected at $steamCmdExe - skipping download." -ForegroundColor Green
 } else {
     $zipUrl = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
     $zipPath = Join-Path $env:TEMP "steamcmd.zip"
 
-    Write-Host "Downloading SteamCMD from $zipUrl ..."
+    Write-Host "Downloading SteamCMD from Valve..." -ForegroundColor Yellow
     try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
     } catch {
-        Write-Error "Failed to download SteamCMD: $_`nYou can download it manually from https://developer.valvesoftware.com/wiki/SteamCMD and extract it to $SteamCmdPath, then re-run this script."
+        Write-Error "Failed to download SteamCMD: $_`nPlease download manually from Valve and place steamcmd.exe in $SteamCmdPath."
         exit 1
     }
 
-    Write-Host "Extracting to $SteamCmdPath ..."
+    Write-Host "Extracting SteamCMD..." -ForegroundColor Yellow
     Expand-Archive -Path $zipPath -DestinationPath $SteamCmdPath -Force
     Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
 
-    # First run bootstraps SteamCMD itself (updates its own files)
-    Write-Host "Running SteamCMD once to let it self-update ..."
+    Write-Host "Bootstrapping SteamCMD (first-run update)..." -ForegroundColor Yellow
     Set-Location $SteamCmdPath
-    & $steamCmdExe +quit
+    & $steamCmdExe +quit | Out-Null
 }
 
 # ------------------------------------------------------------
-# 3. Install / update Rust Dedicated Server
+# 3. Download / Update Rust Dedicated Server
 # ------------------------------------------------------------
-Write-Step "Installing the Rust Dedicated Server (app 258550) - this can take a while"
+Write-Step "Step 3: Downloading Rust Dedicated Server (Steam App 258550)"
+Write-Host "This will download ~12-15 GB of files. Please be patient depending on your connection." -ForegroundColor Yellow
 
 Set-Location $SteamCmdPath
 & $steamCmdExe +force_install_dir "$RustGamePath" +login anonymous +app_update 258550 validate +quit
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "SteamCMD exited with code $LASTEXITCODE. The install may be incomplete - you can re-run this script, or run Manage-RustServer.ps1 -Action update later."
+    Write-Warning "SteamCMD exited with status code $LASTEXITCODE. You can retry anytime via Manage-RustServer.ps1 -Action update."
 } else {
-    Write-Host "Rust Dedicated Server installed/updated successfully." -ForegroundColor Green
+    Write-Host "Rust Dedicated Server files installed successfully." -ForegroundColor Green
 }
 
 # ------------------------------------------------------------
-# 4. Server settings
+# 4. Server Customization
 # ------------------------------------------------------------
-Write-Step "Server settings"
+Write-Step "Step 4: Configure Your Server"
 
-$Hostname    = Read-Default "Server hostname" "My Awesome Rust Server"
-$Description = Read-Default "Server description" "A friendly Rust server."
-$ServerPort  = [int](Read-Default "Server port" 28015)
-$QueryPort   = [int](Read-Default "Query port" 28017)
-$RCONPort    = [int](Read-Default "RCON port" 28016)
+$Hostname    = Read-Default "Server Display Name" "My Rust Community Server"
+$Description = Read-Default "Server Description" "Welcome! A friendly Rust server. Wipe schedule: Monthly."
+$MaxPlayers  = [int](Read-Default "Max Players" 100)
+$ServerPort  = [int](Read-Default "Game Port (UDP)" 28015)
+$QueryPort   = [int](Read-Default "Query Port (UDP)" 28017)
+$RCONPort    = [int](Read-Default "RCON Port (TCP)" 28016)
 
-$rconPass = Read-Host "RCON password [leave blank to auto-generate a random one]"
+$rconPass = Read-Host "RCON Password [Press ENTER to auto-generate a secure password]"
 if ([string]::IsNullOrWhiteSpace($rconPass)) {
     $rconPass = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 16 | ForEach-Object { [char]$_ })
-    Write-Host "Generated RCON password: $rconPass" -ForegroundColor Yellow
+    Write-Host "Generated RCON Password: $rconPass" -ForegroundColor Yellow
 }
 
-$MaxPlayers = [int](Read-Default "Max players" 150)
-$WorldSize  = [int](Read-Default "World size" 4500)
+$WorldSize  = [int](Read-Default "World Map Size (3000 = Small, 4000-4500 = Standard)" 4250)
 
-$seedInput = Read-Host "Map seed [leave blank for random]"
+$seedInput = Read-Host "Map Seed [Press ENTER for random seed]"
 if ([string]::IsNullOrWhiteSpace($seedInput)) {
-    $Seed = Get-Random -Minimum 1 -Maximum 999999999
-    Write-Host "Generated seed: $Seed" -ForegroundColor Yellow
+    $Seed = Get-Random -Minimum 100000 -Maximum 999999999
+    Write-Host "Generated Seed: $Seed" -ForegroundColor Yellow
 } else {
     $Seed = [int]$seedInput
 }
 
-Write-Host ""
-Write-Host "Map type: 'Procedural Map', 'Barren', 'CraggyIsland', 'HapisIsland' - or leave blank to use a custom map URL"
-$Level = Read-Default "Map type" "Procedural Map"
+$Level = Read-Default "Map Type (Procedural Map, Barren, HapisIsland)" "Procedural Map"
 $LevelURL = ""
-if ([string]::IsNullOrWhiteSpace($Level)) {
-    $LevelURL = Read-Host "Custom map download URL"
+if ([string]::IsNullOrWhiteSpace($Level) -or $Level -eq "Custom") {
+    $LevelURL = Read-Host "Custom Map URL (.map file link)"
 }
 
-$SaveInterval = [int](Read-Default "Save interval (seconds)" 300)
-$TickRate     = [int](Read-Default "Tick rate" 30)
+$SaveInterval = [int](Read-Default "Auto-Save Interval in Seconds" 300)
+$TickRate     = [int](Read-Default "Server Tick Rate" 30)
 
 # ------------------------------------------------------------
-# 5. Nightly restart / wipe schedule
+# 5. Nightly Maintenance & Wipe Schedule
 # ------------------------------------------------------------
-Write-Step "Nightly restart & wipe schedule"
+Write-Step "Step 5: Automated Restarts & Wipe Schedule"
 
-$nightlyAns = Read-Default "Enable a nightly restart? (y/n)" "y"
+$nightlyAns = Read-Default "Enable automated nightly restarts/wipes? (y/n)" "y"
 $NightlyRestartEnabled = ($nightlyAns -match '^(y|yes)$')
 $NightlyRestartTime = "04:00"
 $WipeSchedule = "None"
@@ -180,29 +187,28 @@ $WipeDayOfWeek = "Thursday"
 $WipeWeekOfMonth = "First"
 
 if ($NightlyRestartEnabled) {
-    $NightlyRestartTime = Read-Default "What time should the nightly restart run? (24h HH:mm)" "04:00"
+    $NightlyRestartTime = Read-Default "Scheduled maintenance time (24h format HH:mm)" "04:00"
 
     Write-Host ""
-    Write-Host "Wipe schedule options:"
-    Write-Host "  None      - never auto-wipe, just restart nightly"
-    Write-Host "  Daily     - wipe every night"
-    Write-Host "  Weekly    - wipe on a chosen day every week"
-    Write-Host "  BiWeekly  - wipe on a chosen day every other week"
-    Write-Host "  Monthly   - wipe on a chosen occurrence each month (e.g. 'First Thursday', the classic Rust forced-wipe schedule)"
-    $WipeSchedule = Read-Default "Wipe schedule" "Monthly"
+    Write-Host "Select a Wipe Schedule:" -ForegroundColor Cyan
+    Write-Host "  None     - Restart nightly without wiping"
+    Write-Host "  Weekly   - Wipe once a week on a selected day"
+    Write-Host "  BiWeekly - Wipe every other week"
+    Write-Host "  Monthly  - Wipe once a month (e.g. First Thursday - official Facepunch schedule)"
+    $WipeSchedule = Read-Default "Schedule choice (None/Weekly/BiWeekly/Monthly)" "Monthly"
 
     if ($WipeSchedule -in @('Weekly', 'BiWeekly', 'Monthly')) {
-        $WipeDayOfWeek = Read-Default "Wipe day of week" "Thursday"
+        $WipeDayOfWeek = Read-Default "Day of the week for wipe (e.g., Thursday)" "Thursday"
     }
     if ($WipeSchedule -eq 'Monthly') {
-        $WipeWeekOfMonth = Read-Default "Which occurrence in the month (First/Second/Third/Fourth/Last)" "First"
+        $WipeWeekOfMonth = Read-Default "Which occurrence in month? (First/Second/Third/Fourth/Last)" "First"
     }
 }
 
 # ------------------------------------------------------------
-# 6. Write config.json
+# 6. Save Configuration
 # ------------------------------------------------------------
-Write-Step "Saving configuration"
+Write-Step "Step 6: Saving Configuration"
 
 $Config = [ordered]@{
     SteamCmdPath          = $SteamCmdPath
@@ -233,91 +239,89 @@ $Config = [ordered]@{
 
 $ConfigPath = Join-Path $RootPath "RustServer.config.json"
 $Config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
-Write-Host "Saved $ConfigPath" -ForegroundColor Green
+Write-Host "Saved configuration to: $ConfigPath" -ForegroundColor Green
 
 # ------------------------------------------------------------
-# 7. Copy Manage-RustServer.ps1 next to the install
+# 7. Copy Management Scripts & Batch Launchers
 # ------------------------------------------------------------
-Write-Step "Deploying the management script"
+Write-Step "Step 7: Deploying Management Scripts"
 
-$manageSource = Join-Path $PSScriptRoot "Manage-RustServer.ps1"
-$manageDest   = Join-Path $RootPath "Manage-RustServer.ps1"
-
-if (Test-Path $manageSource) {
-    Copy-Item -Path $manageSource -Destination $manageDest -Force
-    Write-Host "Copied Manage-RustServer.ps1 to $manageDest"
-} else {
-    Write-Warning "Manage-RustServer.ps1 was not found next to this installer. Place it in $RootPath manually - the config file it needs ($ConfigPath) is already set up."
-}
-
-# ------------------------------------------------------------
-# 8. Firewall rules (requires admin)
-# ------------------------------------------------------------
-if ($isAdmin) {
-    Write-Step "Firewall rules"
-    $fwAns = Read-Default "Open the server/query/RCON ports in Windows Firewall now? (y/n)" "y"
-    if ($fwAns -match '^(y|yes)$') {
-        $rules = @(
-            @{ Name = "Rust Server - Game Port ($ServerIdentity)"; Port = $ServerPort; Protocol = "UDP" },
-            @{ Name = "Rust Server - Query Port ($ServerIdentity)"; Port = $QueryPort; Protocol = "UDP" },
-            @{ Name = "Rust Server - RCON Port ($ServerIdentity)"; Port = $RCONPort; Protocol = "TCP" }
-        )
-        foreach ($r in $rules) {
-            if (-not (Get-NetFirewallRule -DisplayName $r.Name -ErrorAction SilentlyContinue)) {
-                New-NetFirewallRule -DisplayName $r.Name -Direction Inbound -Protocol $r.Protocol -LocalPort $r.Port -Action Allow | Out-Null
-                Write-Host "Opened $($r.Protocol) port $($r.Port) ($($r.Name))"
-            } else {
-                Write-Host "Rule '$($r.Name)' already exists - skipping."
-            }
-        }
+$filesToDeploy = @("Manage-RustServer.ps1", "Manage.bat", "RustServer.config.example.json")
+foreach ($fileName in $filesToDeploy) {
+    $src = Join-Path $PSScriptRoot $fileName
+    $dst = Join-Path $RootPath $fileName
+    if (Test-Path $src) {
+        Copy-Item -Path $src -Destination $dst -Force
+        Write-Host "Copied $fileName to $RootPath" -ForegroundColor DarkGray
     }
 }
 
 # ------------------------------------------------------------
-# 9. Scheduled task for nightly restart/wipe (requires admin)
+# 8. Firewall Configuration
 # ------------------------------------------------------------
+if ($isAdmin) {
+    Write-Step "Step 8: Windows Firewall Rules"
+    $fwAns = Read-Default "Automatically allow Rust server ports through Windows Firewall? (y/n)" "y"
+    if ($fwAns -match '^(y|yes)$') {
+        $rules = @(
+            @{ Name = "Rust Game Port ($ServerIdentity)"; Port = $ServerPort; Protocol = "UDP" },
+            @{ Name = "Rust Query Port ($ServerIdentity)"; Port = $QueryPort; Protocol = "UDP" },
+            @{ Name = "Rust RCON Port ($ServerIdentity)"; Port = $RCONPort; Protocol = "TCP" }
+        )
+        foreach ($r in $rules) {
+            $existing = Get-NetFirewallRule -DisplayName $r.Name -ErrorAction SilentlyContinue
+            if (-not $existing) {
+                New-NetFirewallRule -DisplayName $r.Name -Direction Inbound -Protocol $r.Protocol -LocalPort $r.Port -Action Allow | Out-Null
+                Write-Host "Created Inbound Rule: $($r.Name) ($($r.Protocol) $($r.Port))" -ForegroundColor Green
+            } else {
+                Write-Host "Firewall rule already exists: $($r.Name)" -ForegroundColor DarkGray
+            }
+        }
+    }
+} else {
+    Write-Warning "Skipped Windows Firewall rules (not running as Administrator)."
+}
+
+# ------------------------------------------------------------
+# 9. Scheduled Task
+# ------------------------------------------------------------
+$managePsScript = Join-Path $RootPath "Manage-RustServer.ps1"
+
 if ($isAdmin -and $NightlyRestartEnabled) {
-    Write-Step "Scheduled task"
+    Write-Step "Step 9: Registering Windows Scheduled Task"
     $taskName = "RustServer - Nightly Maintenance ($ServerIdentity)"
 
     $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($existing) {
-        Write-Host "A scheduled task named '$taskName' already exists - removing it first."
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     }
 
     $action = New-ScheduledTaskAction -Execute "powershell.exe" `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$manageDest`" -Action nightly"
+        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$managePsScript`" -Action nightly"
     $trigger = New-ScheduledTaskTrigger -Daily -At $NightlyRestartTime
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
-    Write-Host "Created scheduled task '$taskName' - runs daily at $NightlyRestartTime." -ForegroundColor Green
-    if ($WipeSchedule -ne 'None') {
-        $occurrenceNote = if ($WipeSchedule -eq 'Monthly') { ", occurrence: $WipeWeekOfMonth" } else { "" }
-        Write-Host "It will wipe instead of restart according to the '$WipeSchedule' schedule (day: $WipeDayOfWeek$occurrenceNote)."
-    }
-} elseif ($NightlyRestartEnabled -and -not $isAdmin) {
-    Write-Warning "Skipped creating the scheduled task because this script isn't running as Administrator. Re-run this installer elevated, or create the task yourself:`n  powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$manageDest`" -Action nightly`n  (trigger: daily at $NightlyRestartTime)"
+    Write-Host "Registered scheduled task '$taskName' running daily at $NightlyRestartTime." -ForegroundColor Green
 }
 
 # ------------------------------------------------------------
-# 10. Done - optionally start now
+# 10. Summary & Launch
 # ------------------------------------------------------------
-Write-Step "Setup complete"
+Write-Step "Installation Complete!"
 
-Write-Host "Install root:      $RootPath  (top-level folder for this server)"
-Write-Host "Rust game folder:  $RustGamePath  (RustDedicated.exe + save data, inside the root)"
-Write-Host "Config file:       $ConfigPath"
-Write-Host "Management script: $manageDest"
-Write-Host "RCON password:     $rconPass"
+Write-Host "Root Directory:       $RootPath"
+Write-Host "Game Directory:       $RustGamePath"
+Write-Host "Config File:          $ConfigPath"
+Write-Host "Saved RCON Password:  $rconPass"
+Write-Host ""
+Write-Host "NOTE: To let external players connect, forward UDP ports $ServerPort, $QueryPort and TCP port $RCONPort in your home router settings." -ForegroundColor Yellow
 Write-Host ""
 
-$startAns = Read-Default "Start the Rust server now? (y/n)" "y"
+$startAns = Read-Default "Would you like to start your Rust server right now? (y/n)" "y"
 if ($startAns -match '^(y|yes)$') {
-    & $manageDest -Action start
+    & (Join-Path $RootPath "Manage-RustServer.ps1") -Action start
 } else {
-    Write-Host "You can start it any time with:"
-    Write-Host "  powershell.exe -File `"$manageDest`" -Action start"
+    Write-Host "You can start or manage your server anytime by double-clicking 'Manage.bat' in $RootPath." -ForegroundColor Green
 }
