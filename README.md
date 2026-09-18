@@ -34,7 +34,7 @@ with an optional nightly restart and automated wipe schedule.
 
 ```powershell
   git clone https://github.com/djacidfx/RustServer.git
-cd <your-repo>
+cd RustServer
 
 # Run elevated (Start PowerShell "as Administrator") for firewall +
 # scheduled task support
