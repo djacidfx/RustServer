@@ -1,5 +1,5 @@
 # 🛠️ Rust Dedicated Server Manager for Windows
-
+![Rust Banner](rust_readme_banner.svg)
 A turn-key, beginner-friendly toolset to install, run, update, and automate a [Rust](https://rust.facepunch.com/) Dedicated Server on Windows. 
 
 Designed so that **anyone**, regardless of technical experience, can get a server running in minutes without manual command-line wrangling.
