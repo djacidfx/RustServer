@@ -12,7 +12,10 @@ If this tool helped you launch and maintain your Rust server, consider buying me
   <a href="https://buymeacoffee.com/wildcatstudio" target="_blank">
     <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" width="210">
   </a>
-</p>
+  <br><br>
+  <a href="https://wildcatstudio.us/" target="_blank">
+    <img src="https://img.shields.io/badge/Website-wildcatstudio.us-007ACC?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Website" />
+  </a>
 </p>
 
 
