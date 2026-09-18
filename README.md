@@ -33,8 +33,8 @@ with an optional nightly restart and automated wipe schedule.
 ## Quick Start
 
 ```powershell
-git clone https://github.com/<you>/<your-repo>.git
-cd <your-repo>
+  git clone https://github.com/djacidfx/RustServer.git
+cd RustServer
 
 # Run elevated (Start PowerShell "as Administrator") for firewall +
 # scheduled task support
