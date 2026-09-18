@@ -1,4 +1,4 @@
-# Rust Dedicated Server Manager (PowerShell)
+# Rust Dedicated Server Manager (Windows/PowerShell)
 
 Interactive installer and day-to-day management scripts for running a
 [Rust](https://rust.facepunch.com/) Dedicated Server on Windows — install
