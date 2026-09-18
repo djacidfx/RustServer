@@ -229,7 +229,8 @@ function Start-RustServer {
         $arguments += "+server.url `"$($Script:Config.ServerURL)`""
     }
 
-    Start-Process -FilePath $paths.Executable -ArgumentList $arguments -NoNewWindow | Out-Null
+    $argString = $arguments -join ' '
+    Start-Process -FilePath $paths.Executable -ArgumentList $argString -NoNewWindow | Out-Null
 
     Write-Host "Waiting for server process initialization (10 seconds)..." -ForegroundColor Gray
     Start-Sleep -Seconds 10
@@ -358,12 +359,11 @@ function Wipe-RustServer {
     Write-Log "Removing map and world save files in $($paths.ServerIdentityPath)..."
     Get-ChildItem -Path $paths.ServerIdentityPath -Filter "*.sav" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
     Get-ChildItem -Path $paths.ServerIdentityPath -Filter "*.map" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-    Get-ChildItem -Path $paths.ServerIdentityPath -Filter "*.db" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
     Remove-Item -Path "$($paths.ServerIdentityPath)\storage\*" -Recurse -ErrorAction SilentlyContinue -Force
 
     if ($Type -eq "Full") {
-        Write-Log "Erasing player blueprints, data, and stats (Full Wipe)..."
-        Remove-Item -Path "$($paths.ServerIdentityPath)\player.blueprints*" -ErrorAction SilentlyContinue -Force
+        Write-Log "Erasing player blueprints, databases, and stats (Full Wipe)..."
+        Get-ChildItem -Path $paths.ServerIdentityPath -Filter "*.db" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
         Remove-Item -Path "$($paths.ServerIdentityPath)\player.data*" -ErrorAction SilentlyContinue -Force
         Remove-Item -Path "$($paths.ServerIdentityPath)\pvp.stats*" -ErrorAction SilentlyContinue -Force
     }

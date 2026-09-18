@@ -119,7 +119,7 @@ if (Test-Path $steamCmdExe) {
 
     Write-Host "Bootstrapping SteamCMD (first-run update)..." -ForegroundColor Yellow
     Set-Location $SteamCmdPath
-    & $steamCmdExe +quit | Out-Null
+    & $steamCmdExe +quit
 }
 
 # ------------------------------------------------------------
@@ -251,8 +251,14 @@ foreach ($fileName in $filesToDeploy) {
     $src = Join-Path $PSScriptRoot $fileName
     $dst = Join-Path $RootPath $fileName
     if (Test-Path $src) {
-        Copy-Item -Path $src -Destination $dst -Force
-        Write-Host "Copied $fileName to $RootPath" -ForegroundColor DarkGray
+        $resolvedSrc = (Resolve-Path $src).Path
+        $resolvedDst = if (Test-Path $dst) { (Resolve-Path $dst).Path } else { $dst }
+        if ($resolvedSrc -ne $resolvedDst) {
+            Copy-Item -Path $src -Destination $dst -Force
+            Write-Host "Copied $fileName to $RootPath" -ForegroundColor DarkGray
+        } else {
+            Write-Host "$fileName is already located in $RootPath." -ForegroundColor DarkGray
+        }
     }
 }
 

@@ -64,12 +64,12 @@
     <rect x="220" width="10" height="6" fill="#CD412B"/>
   </g>
 
-  <!-- Stylized Rust Logo Emblem -->
+  <!-- Stylized Rust Logo Emblem (Iconic Rust Symbol: Cog/Shield with cutouts) -->
   <g transform="translate(60, 45)" filter="url(#shadow)">
     <!-- Base Icon Plate -->
     <rect x="0" y="0" width="170" height="170" rx="14" fill="url(#metalPlate)" stroke="#CD412B" stroke-width="3"/>
     
-    <!-- Stylized Rust Hazard / Cog Glyph -->
+    <!-- Stylized Rust Radiation / Cog Glyph -->
     <g transform="translate(85, 85)">
       <!-- Outer segmented ring -->
       <circle r="60" fill="none" stroke="#CD412B" stroke-width="8" stroke-dasharray="24 10" opacity="0.9"/>
@@ -91,8 +91,10 @@
   </g>
 
   <!-- Typography Section -->
+  <!-- "RUST" Title -->
   <g transform="translate(265, 130)" filter="url(#shadow)">
     <text font-family="'Impact', 'Arial Black', sans-serif" font-weight="900" font-size="94" letter-spacing="8" fill="url(#rustGradient)">RUST</text>
+    <!-- Top Highlights on Text -->
     <text font-family="'Impact', 'Arial Black', sans-serif" font-weight="900" font-size="94" letter-spacing="8" fill="none" stroke="#FFA07A" stroke-width="1.5" opacity="0.4">RUST</text>
   </g>
 
@@ -103,14 +105,17 @@
 
   <!-- Badges / Tags below -->
   <g transform="translate(268, 195)">
+    <!-- Badge 1: Facepunch Studios -->
     <rect x="0" y="0" width="135" height="24" rx="4" fill="#20242a" stroke="#374151" stroke-width="1"/>
     <text x="12" y="16" font-family="'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#9CA3AF">FACEPUNCH STUDIOS</text>
 
+    <!-- Badge 2: Steam App ID -->
     <g transform="translate(145, 0)">
       <rect x="0" y="0" width="105" height="24" rx="4" fill="#20242a" stroke="#374151" stroke-width="1"/>
       <text x="10" y="16" font-family="'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#CD412B">APPID: 252490</text>
     </g>
 
+    <!-- Badge 3: Multiplayer Survival -->
     <g transform="translate(260, 0)">
       <rect x="0" y="0" width="130" height="24" rx="4" fill="#20242a" stroke="#374151" stroke-width="1"/>
       <text x="10" y="16" font-family="'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#10B981">● MULTIPLAYER</text>
@@ -119,11 +124,13 @@
 
   <!-- Right Decorative Industrial Elements -->
   <g transform="translate(730, 60)" opacity="0.3">
+    <!-- Hazard diagonal stripes -->
     <line x1="0" y1="0" x2="30" y2="30" stroke="#CD412B" stroke-width="6"/>
     <line x1="15" y1="0" x2="45" y2="30" stroke="#CD412B" stroke-width="6"/>
     <line x1="30" y1="0" x2="60" y2="30" stroke="#CD412B" stroke-width="6"/>
     <line x1="45" y1="0" x2="75" y2="30" stroke="#CD412B" stroke-width="6"/>
   </g>
 
+  <!-- Subtle bottom right coordinates / technical vibe -->
   <text x="820" y="235" font-family="monospace" font-size="10" fill="#4B5563" text-anchor="end">LOC: 52°13'N / SURVIVE_OR_DIE</text>
 </svg>
