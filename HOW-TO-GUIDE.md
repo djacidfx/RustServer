@@ -1,6 +1,7 @@
 # 📖 Rust Dedicated Server - Complete Beginner's How-To Guide
 
 A comprehensive, step-by-step guide to installing, configuring, port-forwarding, and managing your own dedicated [Rust](https://rust.facepunch.com/) server on Windows.
+
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/wildcatstudio)
 ---
 
