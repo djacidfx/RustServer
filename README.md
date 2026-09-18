@@ -1,7 +1,22 @@
-<p align="center">
-  <img src="rust_readme_banner.svg" alt="Rust Dedicated Server Manager" width="850"/>
-</p>
-
+<p align="center">
+
+  <img src="rust_readme_banner.svg" alt="Rust Dedicated Server Manager" width="850"/>
+
+---
+
+## ☕ Support the Project
+
+If this tool helped you launch and maintain your Rust server, consider buying me a coffee:
+
+<p align="center">
+  <a href="https://buymeacoffee.com/wildcatstudio" target="_blank">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" width="210">
+  </a>
+</p>
+</p>
+
+
+
 # 🛠️ Rust Dedicated Server Manager for Windows
 
 A turn-key, beginner-friendly toolset to install, run, update, and automate a [Rust](https://rust.facepunch.com/) Dedicated Server on Windows. 
@@ -47,8 +62,10 @@ cd RustServer
 ```
 
 ### 2. Run the Installer
-Right-click `Install.bat` and select **Run as Administrator**.
-
+Right-click `Install.bat` and select **Run as Administrator**.
+
+
+
 *(For a complete walkthrough and router port-forwarding guide, see [HOW-TO-GUIDE.md](HOW-TO-GUIDE.md).)*
 
 Follow the on-screen prompts:
