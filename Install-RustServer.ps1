@@ -57,10 +57,25 @@ if (-not $isAdmin) {
 # ------------------------------------------------------------
 Write-Step "Where should everything be installed?"
 
-$RootPath      = Read-Default "Install root folder" "C:\RustServer"
-$SteamCmdPath  = Read-Default "SteamCMD folder" (Join-Path $RootPath "SteamCMD")
-$RustGamePath  = Read-Default "Rust game folder" (Join-Path $RootPath "rust_game")
-$ServerIdentity = Read-Default "Server identity name (folder under rust_game\server\)" "RustServer"
+Write-Host "The install root folder is the top-level folder for this server"
+Write-Host "instance - it holds SteamCMD, the Rust game files, your config file,"
+Write-Host "and the log. Most people only need to set this one and can accept"
+Write-Host "the defaults for the two sub-folders below it."
+Write-Host ""
+
+$RootPath = Read-Default "Install root folder (everything else lives under here)" "C:\RustServer"
+
+Write-Host ""
+Write-Host "SteamCMD is Valve's tool used to download/update the Rust server files."
+$SteamCmdPath = Read-Default "SteamCMD folder" (Join-Path $RootPath "SteamCMD")
+
+Write-Host ""
+Write-Host "This is where the actual Rust Dedicated Server (RustDedicated.exe,"
+Write-Host "the map, and player/save data) gets installed - a sub-folder of the"
+Write-Host "install root above, not a separate location."
+$RustGamePath = Read-Default "Rust game folder" (Join-Path $RootPath "rust_game")
+
+$ServerIdentity = Read-Default "Server identity name (save-data folder under rust_game\server\)" "RustServer"
 
 foreach ($p in @($RootPath, $SteamCmdPath, $RustGamePath)) {
     if (-not (Test-Path $p)) {
@@ -292,8 +307,8 @@ if ($isAdmin -and $NightlyRestartEnabled) {
 # ------------------------------------------------------------
 Write-Step "Setup complete"
 
-Write-Host "Install root:      $RootPath"
-Write-Host "Rust game folder:  $RustGamePath"
+Write-Host "Install root:      $RootPath  (top-level folder for this server)"
+Write-Host "Rust game folder:  $RustGamePath  (RustDedicated.exe + save data, inside the root)"
 Write-Host "Config file:       $ConfigPath"
 Write-Host "Management script: $manageDest"
 Write-Host "RCON password:     $rconPass"
